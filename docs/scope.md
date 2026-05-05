@@ -1,51 +1,53 @@
-# Scope
+# Скоуп
 
-## Goal
+## Цель
 
-Build a first working version of a Telegram assistant that helps a sales manager
-prepare a commercial offer for 1C products in the field.
+Собрать первую рабочую версию Telegram-помощника, который помогает менеджеру по
+продажам быстро подготовить коммерческое предложение по продуктам 1С в полевых
+условиях.
 
-The manager writes a free-form request in Telegram. The bot uses an OpenRouter
-model to interpret the request, calls the `mcp-1c-price` MCP server to find
-current 1C products and prices, asks clarifying questions when a product choice
-is ambiguous, and returns the final commercial offer as a Markdown file.
+Менеджер пишет свободный запрос в Telegram. Бот использует модель через
+OpenRouter, чтобы разобрать запрос, вызывает MCP-сервер `mcp-1c-price` для
+поиска актуальных продуктов и цен 1С, задаёт уточняющие вопросы при
+неоднозначном выборе продукта и возвращает готовое КП в виде Markdown-файла.
 
-## In Scope for v1
+## Входит в v1
 
-- Telegram bot launched via long polling.
-- Free-form text requests from a sales manager.
-- OpenRouter LLM integration with the model selected through environment
-  configuration.
-- MCP integration with `mcp-1c-price`.
-- Calls to MCP tools:
+- Telegram-бот, запускаемый через long polling.
+- Свободные текстовые запросы от менеджера.
+- Интеграция с LLM через OpenRouter, модель выбирается через переменные
+  окружения.
+- Интеграция с MCP-сервером `mcp-1c-price`.
+- Вызовы MCP-инструментов:
   - `search_products`
   - `get_product`
   - `build_quote`
   - `refresh_prices`
-- Local SQLite storage for users, messages, quote drafts, and selected items.
-- Markdown commercial offer generation from a template.
-- Sending the generated Markdown file back to the manager in Telegram.
-- `/start` command with a short usage message.
-- `/refresh_prices` command for updating the local 1C price database through MCP.
+- Локальное хранилище SQLite для пользователей, сообщений, черновиков КП и
+  выбранных позиций.
+- Формирование Markdown КП по шаблону.
+- Отправка сформированного Markdown-файла менеджеру в Telegram.
+- Команда `/start` с короткой подсказкой по использованию.
+- Команда `/refresh_prices` для обновления локальной базы цен 1С через MCP.
 
-## Out of Scope for v1
+## Не входит в v1
 
-- DOCX generation.
-- Telegram webhook mode.
-- CRM features.
-- User roles and permissions.
-- Admin UI.
-- Multiple commercial offer templates.
-- PostgreSQL or other external database services.
-- Horizontal scaling or multi-instance deployment.
-- Automatic synchronization with external sales systems.
+- Генерация DOCX.
+- Telegram webhook.
+- CRM-функции.
+- Роли и права пользователей.
+- Административный интерфейс.
+- Несколько шаблонов КП.
+- PostgreSQL или другие внешние сервисы баз данных.
+- Горизонтальное масштабирование и запуск нескольких инстансов.
+- Автоматическая синхронизация с внешними системами продаж.
 
-## Success Criteria
+## Критерии успеха
 
-- A manager can start the bot and understand the basic workflow.
-- A manager can request a commercial offer in natural Russian text.
-- The bot can identify requested product positions and quantities.
-- The bot can use MCP price tools to build or validate the quote.
-- The bot can ask for clarification when a product choice is ambiguous.
-- The bot can generate and send a Markdown commercial offer file.
-- Draft state survives a bot restart.
+- Менеджер может запустить бота и понять базовый сценарий работы.
+- Менеджер может запросить КП естественным русским текстом.
+- Бот определяет нужные продуктовые позиции и количество.
+- Бот использует MCP-инструменты цен для сборки или проверки КП.
+- Бот задаёт уточнение, если выбор продукта неоднозначен.
+- Бот формирует и отправляет Markdown-файл КП.
+- Состояние черновика сохраняется после перезапуска бота.

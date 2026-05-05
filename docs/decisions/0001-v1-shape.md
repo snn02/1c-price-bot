@@ -1,38 +1,36 @@
-# Decision 0001: v1 Shape
+# Решение 0001: форма v1
 
-## Status
+## Статус
 
-Accepted.
+Принято.
 
-## Context
+## Контекст
 
-The first version should help a sales manager quickly prepare a commercial
-offer for 1C products from Telegram. The system needs current price data from
-the existing `mcp-1c-price` MCP server and an LLM to interpret free-form
-manager requests.
+Первая версия должна помочь менеджеру по продажам быстро подготовить
+коммерческое предложение по продуктам 1С из Telegram. Системе нужны актуальные
+данные о ценах из существующего MCP-сервера `mcp-1c-price` и LLM для разбора
+свободных запросов менеджера.
 
-The first iteration should minimize infrastructure and document-format
-complexity while still preserving a useful end-to-end workflow.
+Первая итерация должна минимизировать инфраструктуру и сложность документного
+формата, но при этом сохранить полезный end-to-end сценарий.
 
-## Decisions
+## Решения
 
-- Use Python and aiogram for the Telegram bot.
-- Use Telegram long polling for v1.
-- Use OpenRouter through environment-based configuration.
-- Do not hard-code the model in application code.
-- Use the external `mcp-1c-price` MCP server instead of reimplementing price
-  lookup.
-- Store local state in SQLite.
-- Generate Markdown commercial offers from a template.
-- Defer DOCX generation until a later iteration.
+- Использовать Python и aiogram для Telegram-бота.
+- Использовать Telegram long polling в v1.
+- Использовать OpenRouter через конфигурацию на базе переменных окружения.
+- Не зашивать модель в код приложения.
+- Использовать внешний MCP-сервер `mcp-1c-price`, а не реализовывать поиск цен
+  заново.
+- Хранить локальное состояние в SQLite.
+- Формировать Markdown КП по шаблону.
+- Отложить генерацию DOCX до следующей итерации.
 
-## Consequences
+## Последствия
 
-- The bot can be launched locally or on a simple VPS without public HTTPS.
-- The OpenRouter model can be changed by editing configuration only.
-- SQLite keeps v1 deployment simple but is not intended for multi-instance
-  scaling.
-- Markdown is easy to inspect, test, and adapt before investing in DOCX
-  formatting.
-- A later DOCX implementation can reuse the same quote service and MCP
-  integration if renderer boundaries stay clean.
+- Бота можно запускать локально или на простом VPS без публичного HTTPS.
+- Модель OpenRouter можно менять только через конфигурацию.
+- SQLite упрощает деплой v1, но не рассчитан на multi-instance масштабирование.
+- Markdown легко проверять, тестировать и адаптировать до вложений в DOCX-формат.
+- Будущая DOCX-реализация сможет переиспользовать quote service и MCP-интеграцию,
+  если границы renderer останутся чистыми.

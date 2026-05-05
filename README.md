@@ -1,30 +1,31 @@
 # 1C Price Bot
 
-Telegram bot for helping sales managers prepare commercial offers for 1C products.
+Telegram-бот для помощи менеджерам по продажам в подготовке коммерческих
+предложений по продуктам 1С.
 
-The v1 target is a long polling Telegram bot that receives a free-form request,
-uses an OpenRouter model to understand requested products, calls the external
-`mcp-1c-price` MCP server for current 1C prices, and returns a commercial offer
-as a Markdown file rendered from a template.
+Цель v1 — Telegram-бот на long polling, который принимает свободный запрос,
+использует модель через OpenRouter для понимания нужных продуктов, вызывает
+внешний MCP-сервер `mcp-1c-price` для получения актуальных цен 1С и возвращает
+коммерческое предложение в виде Markdown-файла, сформированного по шаблону.
 
-## Current Status
+## Текущий статус
 
-This repository currently contains the project skeleton and planning
-documentation only. Bot implementation, dependencies, tests, and OpenSpec change
-artifacts will be added in later steps.
+Сейчас в репозитории есть только каркас проекта и проектная документация.
+Реализация бота, зависимости, тесты и артефакты OpenSpec change будут добавлены
+отдельными шагами.
 
-## Planned Runtime
+## Планируемый стек
 
 - Python + aiogram
 - Telegram long polling
-- OpenRouter-compatible LLM API
-- External MCP server: `mcp-1c-price`
-- SQLite for local state
-- Jinja2 Markdown template for generated offers
+- LLM API, совместимый с OpenRouter
+- Внешний MCP-сервер: `mcp-1c-price`
+- SQLite для локального состояния
+- Jinja2-шаблон Markdown для формируемых КП
 
-## Documentation
+## Документация
 
-- [Scope](docs/scope.md)
-- [Architecture](docs/architecture.md)
-- [Testing scenarios](docs/testing-scenarios.md)
-- [Decision record: v1 shape](docs/decisions/0001-v1-shape.md)
+- [Скоуп](docs/scope.md)
+- [Архитектура](docs/architecture.md)
+- [Сценарии тестирования](docs/testing-scenarios.md)
+- [Архитектурное решение: форма v1](docs/decisions/0001-v1-shape.md)

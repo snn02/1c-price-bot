@@ -1,23 +1,23 @@
-# Project: 1C Price Bot
+# Проект: 1C Price Bot
 
-## Purpose
+## Назначение
 
-Build a Telegram assistant for sales managers who need current 1C product price
-information and quick commercial offer preparation.
+Собрать Telegram-помощника для менеджеров по продажам, которым нужна актуальная
+информация о ценах продуктов 1С и быстрое формирование коммерческих предложений.
 
-## v1 Direction
+## Направление v1
 
-- Telegram long polling bot.
-- OpenRouter LLM integration.
-- External `mcp-1c-price` MCP server for price lookup and quote building.
-- SQLite for local state.
-- Markdown commercial offer generation from a template.
+- Telegram-бот на long polling.
+- Интеграция с LLM через OpenRouter.
+- Внешний MCP-сервер `mcp-1c-price` для поиска цен и сборки КП.
+- SQLite для локального состояния.
+- Формирование Markdown КП по шаблону.
 
-## Development Notes
+## Правила разработки
 
-- OpenSpec change artifacts and capability specs are intentionally not created
-  yet.
-- Create OpenSpec specifications only after an explicit command.
-- Keep v1 focused on the smallest useful field workflow.
-- Prefer clear module boundaries between Telegram, LLM, MCP, quote
-  orchestration, storage, and rendering.
+- Артефакты OpenSpec change и capability specs пока намеренно не созданы.
+- Создавать OpenSpec-спецификации только после явной команды.
+- Документацию проекта писать на русском языке.
+- Держать v1 сфокусированной на минимальном полезном полевом сценарии.
+- Предпочитать ясные границы модулей между Telegram, LLM, MCP, оркестрацией КП,
+  storage и rendering.

@@ -1,64 +1,65 @@
-# Testing Scenarios
+# Сценарии тестирования
 
-These scenarios describe manual acceptance checks for v1.
+Эти сценарии описывают ручную приёмку v1.
 
-## 1. Start Command
+## 1. Команда Start
 
-1. Run the bot in long polling mode.
-2. Send `/start` from a Telegram account.
-3. Verify that the bot replies with a short description of how to request a
-   commercial offer.
+1. Запустить бота в режиме long polling.
+2. Отправить `/start` из Telegram-аккаунта.
+3. Проверить, что бот отвечает коротким описанием того, как запросить КП.
 
-Expected result: the manager understands that they can send a free-form request
-with product names and quantities.
+Ожидаемый результат: менеджер понимает, что может отправить свободный запрос с
+названиями продуктов и количеством.
 
-## 2. Refresh Prices
+## 2. Обновление цен
 
-1. Send `/refresh_prices`.
-2. Verify that the bot calls the MCP `refresh_prices` tool.
-3. Verify that the bot returns the update result or a clear error message.
+1. Отправить `/refresh_prices`.
+2. Проверить, что бот вызывает MCP-инструмент `refresh_prices`.
+3. Проверить, что бот возвращает результат обновления или понятное сообщение об
+   ошибке.
 
-Expected result: the bot reports whether the 1C price database was updated or
-already current.
+Ожидаемый результат: бот сообщает, была ли база цен 1С обновлена или уже была
+актуальной.
 
-## 3. Simple Quote Request
+## 3. Простой запрос КП
 
-1. Send a request such as:
+1. Отправить запрос, например:
    `ERP корп + сервер мини + клиентская лицензия на 5 мест`
-2. Verify that the bot extracts product positions and quantities.
-3. Verify that the bot calls MCP quote/search tools.
-4. Verify that the bot sends a Markdown commercial offer file.
+2. Проверить, что бот извлекает продуктовые позиции и количество.
+3. Проверить, что бот вызывает MCP-инструменты для поиска или сборки КП.
+4. Проверить, что бот отправляет Markdown-файл КП.
 
-Expected result: the file contains a table with product code, name, quantity,
-price, sum, and total.
+Ожидаемый результат: файл содержит таблицу с кодом продукта, названием,
+количеством, ценой, суммой и итогом.
 
-## 4. Ambiguous Product
+## 4. Неоднозначный продукт
 
-1. Send a request that can match several similar 1C products.
-2. Verify that the bot does not silently finalize the wrong product when MCP or
-   model output indicates ambiguity.
-3. Verify that the bot asks a concise clarification question.
-4. Answer the clarification.
+1. Отправить запрос, который может соответствовать нескольким похожим продуктам
+   1С.
+2. Проверить, что бот не завершает КП молча с неверным продуктом, если MCP или
+   модель показывают неоднозначность.
+3. Проверить, что бот задаёт короткий уточняющий вопрос.
+4. Ответить на уточнение.
 
-Expected result: the bot updates the draft and continues quote generation with
-the selected product.
+Ожидаемый результат: бот обновляет черновик и продолжает формирование КП с
+выбранным продуктом.
 
-## 5. Markdown File Generation
+## 5. Генерация Markdown-файла
 
-1. Complete a quote request.
-2. Open the generated Markdown file.
-3. Verify that it follows the project template.
-4. Verify that values in the table match the MCP quote result.
+1. Завершить запрос КП.
+2. Открыть сформированный Markdown-файл.
+3. Проверить, что он соответствует проектному шаблону.
+4. Проверить, что значения в таблице совпадают с результатом MCP.
 
-Expected result: the offer is readable, complete, and ready to send or copy into
-another document flow.
+Ожидаемый результат: КП читаемое, полное и готово для отправки или переноса в
+другой документный процесс.
 
-## 6. Draft Recovery After Restart
+## 6. Восстановление черновика после перезапуска
 
-1. Start a quote request that requires clarification.
-2. Stop the bot process before answering.
-3. Start the bot again.
-4. Send the clarification answer.
+1. Начать запрос КП, который требует уточнения.
+2. Остановить процесс бота до ответа на уточнение.
+3. Запустить бота снова.
+4. Отправить ответ на уточнение.
 
-Expected result: the bot restores the existing draft from SQLite and continues
-instead of losing the conversation state.
+Ожидаемый результат: бот восстанавливает существующий черновик из SQLite и
+продолжает сценарий, а не теряет состояние диалога.
