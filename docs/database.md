@@ -27,6 +27,11 @@ PRAGMA busy_timeout = 5000;
 
 ## Таблицы
 
+В v1 статусы и роли хранятся в таблицах как строковые коды. Это упрощает схему и
+делает SQL читаемым. Чтобы снизить риск опечаток, для таких полей используются
+`CHECK`-ограничения. Если проекту понадобится более строгая модель, эти поля
+можно будет мигрировать на справочники `*_statuses` и числовые внешние ключи.
+
 ### `telegram_users`
 
 Пользователи Telegram, которые писали боту.
@@ -54,7 +59,9 @@ CREATE TABLE conversations (
     telegram_chat_id INTEGER NOT NULL,
     telegram_user_id INTEGER NOT NULL,
     active_quote_draft_id INTEGER,
-    status TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('active', 'completed', 'cancelled')
+    ),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
 
@@ -91,8 +98,12 @@ CREATE TABLE messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL,
     telegram_message_id INTEGER,
-    direction TEXT NOT NULL,
-    role TEXT NOT NULL,
+    direction TEXT NOT NULL CHECK (
+        direction IN ('in', 'out')
+    ),
+    role TEXT NOT NULL CHECK (
+        role IN ('manager', 'bot', 'system')
+    ),
     text TEXT NOT NULL,
     created_at TEXT NOT NULL,
 
@@ -127,7 +138,16 @@ role: manager | bot | system
 CREATE TABLE quote_drafts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER NOT NULL,
-    status TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN (
+            'collecting',
+            'needs_clarification',
+            'ready',
+            'generated',
+            'cancelled',
+            'superseded'
+        )
+    ),
     title TEXT,
     client_name TEXT,
     manager_note TEXT,
@@ -181,7 +201,9 @@ CREATE TABLE quote_items (
     vat TEXT,
 
     line_sum REAL,
-    status TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'selected', 'ambiguous', 'not_found', 'removed')
+    ),
     ambiguity_reason TEXT,
 
     created_at TEXT NOT NULL,
