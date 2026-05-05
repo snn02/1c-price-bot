@@ -8,9 +8,9 @@
   действие и сам вызывает repository, MCP client или renderer.
 - MCP используется только для продуктов, цен и сборки табличного расчёта.
 - Прайс 1С не пишется в базу бота.
-- В v1 статусы, роли и направления сообщений пишутся строковыми кодами прямо в
-  основные таблицы. Корректность кодов защищается `CHECK`-ограничениями из
-  `docs/database.md`.
+- В v1 статусы черновиков, роли и направления сообщений пишутся строковыми
+  кодами прямо в основные таблицы. Корректность кодов защищается
+  `CHECK`-ограничениями из `docs/database.md`.
 - В примерах ниже `telegram_user_id = 1001`, `telegram_chat_id = 2001`.
 
 ## 1. Простой запрос и создание КП
@@ -22,16 +22,15 @@
 ```sql
 SELECT * FROM telegram_users WHERE telegram_user_id = 1001;
 SELECT * FROM conversations
-WHERE telegram_chat_id = 2001 AND telegram_user_id = 1001 AND status = 'active'
-ORDER BY updated_at DESC LIMIT 1;
+WHERE telegram_chat_id = 2001 AND telegram_user_id = 1001;
 ```
 
 Если пользователя или разговора нет, запись:
 
 ```sql
 INSERT INTO telegram_users (...);
-INSERT INTO conversations (..., active_quote_draft_id, status, ...)
-VALUES (..., NULL, 'active', ...);
+INSERT INTO conversations (..., active_quote_draft_id, ...)
+VALUES (..., NULL, ...);
 ```
 
 Запись входящего сообщения:
@@ -82,13 +81,13 @@ MCP -> search_products/get_product/build_quote
 INSERT INTO quote_items (
     quote_draft_id, source_query, qty,
     selected_product_code, selected_product_name,
-    price_retail, currency, vat, line_sum,
+    price_retail, vat, line_sum,
     status, ambiguity_reason, created_at, updated_at
 )
 VALUES
-(:draft_id, 'УТ', 1, :code_ut, :name_ut, :price_ut, 'руб.', :vat_ut, :sum_ut, 'selected', NULL, :now, :now),
-(:draft_id, 'сервер x64', 1, :code_server, :name_server, :price_server, 'руб.', :vat_server, :sum_server, 'selected', NULL, :now, :now),
-(:draft_id, '10 пользовательских лицензий', 10, :code_license, :name_license, :price_license, 'руб.', :vat_license, :sum_license, 'selected', NULL, :now, :now);
+(:draft_id, 'УТ', 1, :code_ut, :name_ut, :price_ut, :vat_ut, :sum_ut, 'selected', NULL, :now, :now),
+(:draft_id, 'сервер x64', 1, :code_server, :name_server, :price_server, :vat_server, :sum_server, 'selected', NULL, :now, :now),
+(:draft_id, '10 пользовательских лицензий', 10, :code_license, :name_license, :price_license, :vat_license, :sum_license, 'selected', NULL, :now, :now);
 ```
 
 Запись ответа бота:
@@ -167,9 +166,9 @@ Renderer создаёт Markdown-файл. Запись результата:
 
 ```sql
 INSERT INTO generated_quotes (
-    quote_draft_id, file_path, file_format, total_sum, currency, created_at
+    quote_draft_id, file_path, file_format, total_sum, created_at
 )
-VALUES (:draft_id, :file_path, 'md', :total_sum, 'руб.', :now);
+VALUES (:draft_id, :file_path, 'md', :total_sum, :now);
 
 UPDATE quote_drafts
 SET status = 'generated', updated_at = :now
@@ -202,7 +201,6 @@ messages <- ответ со списком позиций
 Итоговое состояние:
 
 ```text
-conversations.status = active
 conversations.active_quote_draft_id = draft_id
 quote_drafts.status = collecting
 generated_quotes: записей нет
@@ -225,17 +223,18 @@ WHERE c.telegram_user_id = 1001
 Опциональная будущая housekeeping-задача может помечать старые черновики как
 `cancelled`, но в v1 без отдельной команды менеджера черновик не удаляется.
 
-## 3. В новом разговоре подняли черновик, сделали новый запрос, создали КП
+## 3. Без активного черновика подняли старый черновик, сделали новый запрос, создали КП
 
-### 3.1 Новый разговор, менеджер пишет `покажи мои черновики`
+### 3.1 Разговор без активного черновика, менеджер пишет `покажи мои черновики`
 
-Создаётся или находится новый `conversation`.
+Находится существующий `conversation` для пары `telegram_chat_id` +
+`telegram_user_id`. Если такой записи ещё нет, она создаётся.
 
 Запись входящего сообщения:
 
 ```sql
 INSERT INTO messages (..., direction, role, text, ...)
-VALUES (:new_conversation_id, ..., 'in', 'manager', 'покажи мои черновики', :now);
+VALUES (:conversation_id, ..., 'in', 'manager', 'покажи мои черновики', :now);
 ```
 
 LLM action selection:
@@ -252,8 +251,10 @@ LLM action selection:
 ```sql
 SELECT
     qd.id, qd.title, qd.status, qd.client_name, qd.updated_at,
-    COUNT(qi.id) AS items_count,
-    COALESCE(SUM(qi.line_sum), 0) AS total_sum
+    COUNT(CASE WHEN qi.status = 'selected' THEN qi.id END) AS selected_items_count,
+    COUNT(CASE WHEN qi.status = 'ambiguous' THEN qi.id END) AS ambiguous_items_count,
+    COUNT(CASE WHEN qi.status = 'not_found' THEN qi.id END) AS not_found_items_count,
+    COALESCE(SUM(CASE WHEN qi.status = 'selected' THEN qi.line_sum ELSE 0 END), 0) AS total_sum
 FROM quote_drafts qd
 JOIN conversations c ON c.id = qd.conversation_id
 LEFT JOIN quote_items qi ON qi.quote_draft_id = qd.id
@@ -268,7 +269,7 @@ LIMIT 10;
 
 ```sql
 INSERT INTO messages (..., direction, role, text, ...)
-VALUES (:new_conversation_id, ..., 'out', 'bot', :drafts_list, :now);
+VALUES (:conversation_id, ..., 'out', 'bot', :drafts_list, :now);
 ```
 
 MCP не вызывается.
@@ -296,12 +297,12 @@ WHERE qd.id = 12
   AND c.telegram_user_id = 1001;
 ```
 
-Связать новый разговор с черновиком:
+Связать текущий разговор с черновиком:
 
 ```sql
 UPDATE conversations
 SET active_quote_draft_id = 12, updated_at = :now
-WHERE id = :new_conversation_id;
+WHERE id = :conversation_id;
 ```
 
 Прочитать позиции и ответить:
@@ -309,7 +310,7 @@ WHERE id = :new_conversation_id;
 ```sql
 SELECT * FROM quote_items WHERE quote_draft_id = 12 AND status != 'removed';
 INSERT INTO messages (..., direction, role, text, ...)
-VALUES (:new_conversation_id, ..., 'out', 'bot', :opened_draft_summary, :now);
+VALUES (:conversation_id, ..., 'out', 'bot', :opened_draft_summary, :now);
 ```
 
 ### 3.3 Менеджер пишет `добавь еще ДО КОРП`
@@ -330,7 +331,7 @@ LLM action selection:
 ```sql
 SELECT active_quote_draft_id
 FROM conversations
-WHERE id = :new_conversation_id;
+WHERE id = :conversation_id;
 ```
 
 LLM product extraction и MCP:
@@ -344,7 +345,7 @@ MCP -> search_products/build_quote
 
 ```sql
 INSERT INTO quote_items (...)
-VALUES (12, 'ДО КОРП', 1, :code_do, :name_do, :price_do, 'руб.', :vat_do, :sum_do, 'selected', NULL, :now, :now);
+VALUES (12, 'ДО КОРП', 1, :code_do, :name_do, :price_do, :vat_do, :sum_do, 'selected', NULL, :now, :now);
 
 UPDATE quote_drafts
 SET status = 'collecting', updated_at = :now
@@ -375,10 +376,10 @@ SELECT * FROM quote_drafts WHERE id = 12;
 SELECT * FROM quote_items WHERE quote_draft_id = 12 AND status = 'selected';
 
 INSERT INTO generated_quotes (...)
-VALUES (12, :file_path, 'md', :total_sum, 'руб.', :now);
+VALUES (12, :file_path, 'md', :total_sum, :now);
 
 UPDATE quote_drafts SET status = 'generated', updated_at = :now WHERE id = 12;
-UPDATE conversations SET active_quote_draft_id = NULL, updated_at = :now WHERE id = :new_conversation_id;
+UPDATE conversations SET active_quote_draft_id = NULL, updated_at = :now WHERE id = :conversation_id;
 ```
 
 ## 4. Запрос, уточнение, совсем новый запрос, создание КП
@@ -416,7 +417,7 @@ MCP или LLM выявляет неоднозначность: ДО ПРОФ и
 INSERT INTO quote_items (
     quote_draft_id, source_query, qty,
     selected_product_code, selected_product_name,
-    price_retail, currency, vat, line_sum,
+    price_retail, vat, line_sum,
     status, ambiguity_reason, created_at, updated_at
 )
 VALUES (
@@ -491,9 +492,9 @@ MCP -> search_products/get_product/build_quote
 ```sql
 INSERT INTO quote_items (...)
 VALUES
-(:draft_b, 'УХ', 1, :code_uh, :name_uh, :price_uh, 'руб.', :vat_uh, :sum_uh, 'selected', NULL, :now, :now),
-(:draft_b, 'сервер x64', 1, :code_server, :name_server, :price_server, 'руб.', :vat_server, :sum_server, 'selected', NULL, :now, :now),
-(:draft_b, '500 пользовательских лицензий', 500, :code_license, :name_license, :price_license, 'руб.', :vat_license, :sum_license, 'selected', NULL, :now, :now);
+(:draft_b, 'УХ', 1, :code_uh, :name_uh, :price_uh, :vat_uh, :sum_uh, 'selected', NULL, :now, :now),
+(:draft_b, 'сервер x64', 1, :code_server, :name_server, :price_server, :vat_server, :sum_server, 'selected', NULL, :now, :now),
+(:draft_b, '500 пользовательских лицензий', 500, :code_license, :name_license, :price_license, :vat_license, :sum_license, 'selected', NULL, :now, :now);
 ```
 
 ### 4.4 Менеджер пишет `Создай КП для ООО Вектор`
@@ -520,7 +521,7 @@ SELECT * FROM quote_items
 WHERE quote_draft_id = :draft_b AND status = 'selected';
 
 INSERT INTO generated_quotes (...)
-VALUES (:draft_b, :file_path, 'md', :total_sum, 'руб.', :now);
+VALUES (:draft_b, :file_path, 'md', :total_sum, :now);
 
 UPDATE quote_drafts
 SET status = 'generated', updated_at = :now
@@ -589,7 +590,7 @@ SELECT * FROM quote_items
 WHERE quote_draft_id = :draft_1 AND status = 'selected';
 
 INSERT INTO generated_quotes (...)
-VALUES (:draft_1, :file_path_1, 'md', :total_sum_1, 'руб.', :now);
+VALUES (:draft_1, :file_path_1, 'md', :total_sum_1, :now);
 
 UPDATE quote_drafts
 SET status = 'generated', updated_at = :now
@@ -664,9 +665,9 @@ MCP -> search_products/get_product/build_quote
 ```sql
 INSERT INTO quote_items (...)
 VALUES
-(:draft_2, 'ERP', 1, :code_erp, :name_erp, :price_erp, 'руб.', :vat_erp, :sum_erp, 'selected', NULL, :now, :now),
-(:draft_2, 'сервер x64', 1, :code_server, :name_server, :price_server, 'руб.', :vat_server, :sum_server, 'selected', NULL, :now, :now),
-(:draft_2, '150 пользовательских лицензий', 150, :code_license, :name_license, :price_license, 'руб.', :vat_license, :sum_license, 'selected', NULL, :now, :now);
+(:draft_2, 'ERP', 1, :code_erp, :name_erp, :price_erp, :vat_erp, :sum_erp, 'selected', NULL, :now, :now),
+(:draft_2, 'сервер x64', 1, :code_server, :name_server, :price_server, :vat_server, :sum_server, 'selected', NULL, :now, :now),
+(:draft_2, '150 пользовательских лицензий', 150, :code_license, :name_license, :price_license, :vat_license, :sum_license, 'selected', NULL, :now, :now);
 ```
 
 ### 5.3 Менеджер создаёт второе КП
@@ -688,7 +689,7 @@ SELECT * FROM quote_items
 WHERE quote_draft_id = :draft_2 AND status = 'selected';
 
 INSERT INTO generated_quotes (...)
-VALUES (:draft_2, :file_path_2, 'md', :total_sum_2, 'руб.', :now);
+VALUES (:draft_2, :file_path_2, 'md', :total_sum_2, :now);
 
 UPDATE quote_drafts
 SET status = 'generated', updated_at = :now

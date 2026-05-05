@@ -25,12 +25,22 @@ PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 5000;
 ```
 
+## Денежные значения
+
+Денежные суммы в базе бота хранятся как `REAL`. В v1 цены продуктов 1С
+ожидаются без дробной части, а расчёты выполняют только умножение цены на
+количество.
+
+При показе менеджеру и при генерации Markdown КП суммы округляются до целых
+значений.
+
 ## Таблицы
 
-В v1 статусы и роли хранятся в таблицах как строковые коды. Это упрощает схему и
-делает SQL читаемым. Чтобы снизить риск опечаток, для таких полей используются
-`CHECK`-ограничения. Если проекту понадобится более строгая модель, эти поля
-можно будет мигрировать на справочники `*_statuses` и числовые внешние ключи.
+В v1 статусы черновиков, роли и направления сообщений хранятся в таблицах как
+строковые коды. Это упрощает схему и делает SQL читаемым. Чтобы снизить риск
+опечаток, для таких полей используются `CHECK`-ограничения. Если проекту
+понадобится более строгая модель, эти поля можно будет мигрировать на
+справочники `*_statuses` и числовые внешние ключи.
 
 ### `telegram_users`
 
@@ -50,8 +60,10 @@ CREATE TABLE telegram_users (
 
 ### `conversations`
 
-Разговоры с ботом. Один пользователь может иметь несколько разговоров.
-`active_quote_draft_id` показывает, с каким черновиком связан текущий разговор.
+Разговоры с ботом. В v1 разговор — это долгоживущий канал общения для пары
+`telegram_chat_id` + `telegram_user_id`, а не отдельное КП и не отдельная
+сессия. `active_quote_draft_id` показывает, с каким черновиком связан текущий
+разговор.
 
 ```sql
 CREATE TABLE conversations (
@@ -59,11 +71,10 @@ CREATE TABLE conversations (
     telegram_chat_id INTEGER NOT NULL,
     telegram_user_id INTEGER NOT NULL,
     active_quote_draft_id INTEGER,
-    status TEXT NOT NULL CHECK (
-        status IN ('active', 'completed', 'cancelled')
-    ),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+
+    UNIQUE (telegram_chat_id, telegram_user_id),
 
     FOREIGN KEY (telegram_user_id)
         REFERENCES telegram_users (telegram_user_id),
@@ -72,21 +83,14 @@ CREATE TABLE conversations (
 );
 ```
 
-Статусы:
-
-```text
-active | completed | cancelled
-```
-
 Пояснения:
 
-- `active` — разговор открыт и может принимать новые сообщения. У него может
-  быть активный черновик в `active_quote_draft_id`.
-- `completed` — разговор завершён штатно: например, КП создано и бот больше не
-  держит активный черновик в этом разговоре.
-- `cancelled` — разговор закрыт без завершения сценария: например, менеджер
-  явно отменил работу или будущая housekeeping-логика закрыла устаревший
+- Для одной пары `telegram_chat_id` + `telegram_user_id` существует один
   разговор.
+- После генерации КП разговор не закрывается. Вместо этого
+  `active_quote_draft_id` сбрасывается в `NULL`, а следующий продуктовый запрос
+  создаёт новый черновик.
+- Отмена, завершение и замена относятся к `quote_drafts`, а не к разговору.
 
 ### `messages`
 
@@ -183,9 +187,9 @@ collecting | needs_clarification | ready | generated | cancelled | superseded
 
 ### `quote_items`
 
-Позиции черновика КП. Поля `selected_product_*`, `price_retail`, `currency`,
-`vat` и `line_sum` являются снимком выбранного продукта на момент расчёта, а не
-копией прайса 1С.
+Позиции черновика КП. Поля `selected_product_*`, `price_retail`, `vat` и
+`line_sum` являются снимком выбранного продукта на момент расчёта, а не копией
+прайса 1С.
 
 ```sql
 CREATE TABLE quote_items (
@@ -197,7 +201,6 @@ CREATE TABLE quote_items (
     selected_product_code TEXT,
     selected_product_name TEXT,
     price_retail REAL,
-    currency TEXT,
     vat TEXT,
 
     line_sum REAL,
@@ -244,7 +247,6 @@ CREATE TABLE generated_quotes (
     file_path TEXT NOT NULL,
     file_format TEXT NOT NULL,
     total_sum REAL,
-    currency TEXT,
     created_at TEXT NOT NULL,
 
     FOREIGN KEY (quote_draft_id)
@@ -255,11 +257,11 @@ CREATE TABLE generated_quotes (
 ## Индексы
 
 ```sql
-CREATE INDEX idx_conversations_user_status
-ON conversations (telegram_user_id, status);
+CREATE INDEX idx_conversations_user
+ON conversations (telegram_user_id);
 
-CREATE INDEX idx_conversations_chat_status
-ON conversations (telegram_chat_id, status);
+CREATE INDEX idx_conversations_chat_user
+ON conversations (telegram_chat_id, telegram_user_id);
 
 CREATE INDEX idx_conversations_active_draft
 ON conversations (active_quote_draft_id);
@@ -282,16 +284,13 @@ ON generated_quotes (quote_draft_id);
 
 ## Типовые чтения
 
-### Найти активный разговор
+### Найти разговор
 
 ```sql
 SELECT *
 FROM conversations
 WHERE telegram_chat_id = :telegram_chat_id
-  AND telegram_user_id = :telegram_user_id
-  AND status = 'active'
-ORDER BY updated_at DESC
-LIMIT 1;
+  AND telegram_user_id = :telegram_user_id;
 ```
 
 ### Получить активный черновик разговора
@@ -312,8 +311,10 @@ SELECT
     qd.status,
     qd.client_name,
     qd.updated_at,
-    COUNT(qi.id) AS items_count,
-    COALESCE(SUM(qi.line_sum), 0) AS total_sum
+    COUNT(CASE WHEN qi.status = 'selected' THEN qi.id END) AS selected_items_count,
+    COUNT(CASE WHEN qi.status = 'ambiguous' THEN qi.id END) AS ambiguous_items_count,
+    COUNT(CASE WHEN qi.status = 'not_found' THEN qi.id END) AS not_found_items_count,
+    COALESCE(SUM(CASE WHEN qi.status = 'selected' THEN qi.line_sum ELSE 0 END), 0) AS total_sum
 FROM quote_drafts qd
 JOIN conversations c ON c.id = qd.conversation_id
 LEFT JOIN quote_items qi ON qi.quote_draft_id = qd.id
@@ -323,6 +324,11 @@ GROUP BY qd.id
 ORDER BY qd.updated_at DESC
 LIMIT 10;
 ```
+
+В списке черновиков сумма и количество выбранных позиций считаются только по
+`quote_items.status = 'selected'`. Удалённые, неоднозначные и ненайденные
+позиции не участвуют в `total_sum`, но могут показываться отдельными счётчиками,
+чтобы менеджер видел, что черновик требует внимания.
 
 ### Проверить, что черновик принадлежит пользователю
 
