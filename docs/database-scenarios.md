@@ -538,3 +538,188 @@ draft_a.status = superseded
 draft_b.status = generated
 generated_quotes содержит файл КП по УХ на 500 пользователей
 ```
+
+## 5. Два КП в одном разговоре
+
+### 5.1 Менеджер создаёт первое КП
+
+Менеджер пишет:
+
+```text
+УТ, сервер, 10 лицензий
+```
+
+Бот выполняет те же операции, что в сценарии 1:
+
+```text
+messages <- входящее сообщение
+LLM -> add_items
+quote_drafts <- draft_1 со status = collecting
+conversations.active_quote_draft_id <- draft_1
+MCP -> продукты и цены
+quote_items <- выбранные позиции первого КП
+messages <- ответ со списком позиций
+```
+
+Менеджер пишет:
+
+```text
+создай КП для ООО Ромашка
+```
+
+LLM action selection:
+
+```json
+{
+  "action": "create_quote_file",
+  "arguments": {
+    "client_name": "ООО Ромашка"
+  }
+}
+```
+
+Запись результата:
+
+```sql
+UPDATE quote_drafts
+SET client_name = 'ООО Ромашка', status = 'ready', updated_at = :now
+WHERE id = :draft_1;
+
+SELECT * FROM quote_items
+WHERE quote_draft_id = :draft_1 AND status = 'selected';
+
+INSERT INTO generated_quotes (...)
+VALUES (:draft_1, :file_path_1, 'md', :total_sum_1, 'руб.', :now);
+
+UPDATE quote_drafts
+SET status = 'generated', updated_at = :now
+WHERE id = :draft_1;
+
+UPDATE conversations
+SET active_quote_draft_id = NULL, updated_at = :now
+WHERE id = :conversation_id;
+```
+
+Ключевое состояние после первого КП:
+
+```text
+quote_drafts[draft_1].status = generated
+conversations.active_quote_draft_id = NULL
+generated_quotes содержит file_path_1
+```
+
+### 5.2 Менеджер в том же разговоре делает новый запрос
+
+Менеджер пишет:
+
+```text
+ERP, сервер, 150 лицензий
+```
+
+Запись входящего сообщения:
+
+```sql
+INSERT INTO messages (..., direction, role, text, ...)
+VALUES (:conversation_id, ..., 'in', 'manager', 'ERP, сервер, 150 лицензий', :now);
+```
+
+LLM action selection:
+
+```json
+{
+  "action": "add_items",
+  "arguments": {
+    "items_text": "ERP, сервер, 150 лицензий"
+  }
+}
+```
+
+Так как `conversations.active_quote_draft_id IS NULL`, бот создаёт новый
+черновик, а не изменяет `draft_1`:
+
+```sql
+INSERT INTO quote_drafts (
+    conversation_id, status, title, client_name, manager_note,
+    clarification_question, created_at, updated_at
+)
+VALUES (
+    :conversation_id, 'collecting', 'ERP, сервер, 150 лицензий',
+    NULL, NULL, NULL, :now, :now
+);
+
+UPDATE conversations
+SET active_quote_draft_id = :draft_2, updated_at = :now
+WHERE id = :conversation_id;
+```
+
+LLM product extraction и MCP:
+
+```text
+LLM -> ERP, сервер x64, 150 пользовательских лицензий
+MCP -> search_products/get_product/build_quote
+```
+
+Запись позиций второго КП:
+
+```sql
+INSERT INTO quote_items (...)
+VALUES
+(:draft_2, 'ERP', 1, :code_erp, :name_erp, :price_erp, 'руб.', :vat_erp, :sum_erp, 'selected', NULL, :now, :now),
+(:draft_2, 'сервер x64', 1, :code_server, :name_server, :price_server, 'руб.', :vat_server, :sum_server, 'selected', NULL, :now, :now),
+(:draft_2, '150 пользовательских лицензий', 150, :code_license, :name_license, :price_license, 'руб.', :vat_license, :sum_license, 'selected', NULL, :now, :now);
+```
+
+### 5.3 Менеджер создаёт второе КП
+
+Менеджер пишет:
+
+```text
+создай КП для ООО Вектор
+```
+
+Запись результата:
+
+```sql
+UPDATE quote_drafts
+SET client_name = 'ООО Вектор', status = 'ready', updated_at = :now
+WHERE id = :draft_2;
+
+SELECT * FROM quote_items
+WHERE quote_draft_id = :draft_2 AND status = 'selected';
+
+INSERT INTO generated_quotes (...)
+VALUES (:draft_2, :file_path_2, 'md', :total_sum_2, 'руб.', :now);
+
+UPDATE quote_drafts
+SET status = 'generated', updated_at = :now
+WHERE id = :draft_2;
+
+UPDATE conversations
+SET active_quote_draft_id = NULL, updated_at = :now
+WHERE id = :conversation_id;
+```
+
+Итог:
+
+```text
+draft_1.status = generated
+draft_2.status = generated
+generated_quotes содержит две записи: file_path_1 и file_path_2
+conversations.active_quote_draft_id = NULL
+```
+
+### 5.4 Защита от изменения уже созданного КП
+
+Если после генерации КП `active_quote_draft_id = NULL`, а менеджер пишет
+неполную команду изменения вроде:
+
+```text
+добавь еще ДО
+```
+
+бот не должен автоматически менять последний `generated`-черновик. Он должен
+создать новый расчёт только при достаточном продуктовом запросе или уточнить:
+
+```text
+Создать новый расчёт с ДО или открыть один из прошлых черновиков как основу?
+```
