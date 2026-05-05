@@ -46,10 +46,8 @@ LLM-слой отвечает за структурированную интер
 
 LLM используется в два шага:
 
-1. Tool/action selection — выбрать намерение менеджера и вернуть структурированное
-   действие, например `list_drafts`, `open_draft`, `add_items`,
-   `replace_item`, `remove_item`, `create_quote_file`, `refresh_prices` или
-   `clarify_answer`.
+1. Tool/action selection — выбрать намерение менеджера и вернуть одно из
+   действий, перечисленных в разделе `Supported LLM actions`.
 2. Product extraction / quote reasoning — выполняется только для действий,
    которым нужны продукты, лицензии, апгрейды или бандлы.
 

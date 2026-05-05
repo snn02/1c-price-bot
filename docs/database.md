@@ -135,8 +135,9 @@ role: manager | bot | system
 
 ### `quote_drafts`
 
-Черновики КП. Черновик принадлежит пользователю через исходный `conversation_id`,
-но может быть открыт в новом разговоре через `conversations.active_quote_draft_id`.
+Черновики КП. Черновик создаётся внутри долгоживущего `conversation` и может
+быть открыт как текущий рабочий черновик через
+`conversations.active_quote_draft_id`.
 
 ```sql
 CREATE TABLE quote_drafts (

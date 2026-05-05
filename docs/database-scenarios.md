@@ -423,7 +423,7 @@ INSERT INTO quote_items (
 VALUES (
     :draft_a, 'ДО', 1,
     NULL, NULL,
-    NULL, NULL, NULL, NULL,
+    NULL, NULL, NULL,
     'ambiguous', 'Нужно выбрать редакцию: ПРОФ или КОРП', :now, :now
 );
 
