@@ -1,0 +1,19 @@
+# Коммерческое предложение
+
+Клиент: {{ client_name }}
+
+Дата: {{ generated_at }}
+
+| Код | Наименование | Кол-во | Цена | Сумма | НДС |
+| --- | --- | ---: | ---: | ---: | --- |
+{% for item in items -%}
+| {{ item.code }} | {{ item.name }} | {{ item.qty }} | {{ "%.0f"|format(item.price_retail) }} | {{ "%.0f"|format(item.line_sum) }} | {{ item.vat }} |
+{% endfor %}
+
+Итого: {{ "%.0f"|format(total_sum) }}
+
+{% if note -%}
+Примечание: {{ note }}
+{% else -%}
+Примечание: цены и состав позиций сформированы на основании данных MCP.
+{% endif %}

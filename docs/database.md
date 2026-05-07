@@ -61,7 +61,7 @@ CREATE TABLE telegram_users (
 ### `conversations`
 
 Разговоры с ботом. В v1 разговор — это долгоживущий канал общения для пары
-`telegram_chat_id` + `telegram_user_id`, а не отдельное КП и не отдельная
+`telegram_chat_id` + `telegram_users.id`, а не отдельное КП и не отдельная
 сессия. `active_quote_draft_id` показывает, с каким черновиком связан текущий
 разговор.
 
@@ -69,15 +69,15 @@ CREATE TABLE telegram_users (
 CREATE TABLE conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_chat_id INTEGER NOT NULL,
-    telegram_user_id INTEGER NOT NULL,
+    telegram_user_pk INTEGER NOT NULL,
     active_quote_draft_id INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
 
-    UNIQUE (telegram_chat_id, telegram_user_id),
+    UNIQUE (telegram_chat_id, telegram_user_pk),
 
-    FOREIGN KEY (telegram_user_id)
-        REFERENCES telegram_users (telegram_user_id),
+    FOREIGN KEY (telegram_user_pk)
+        REFERENCES telegram_users (id),
     FOREIGN KEY (active_quote_draft_id)
         REFERENCES quote_drafts (id)
 );
@@ -85,7 +85,7 @@ CREATE TABLE conversations (
 
 Пояснения:
 
-- Для одной пары `telegram_chat_id` + `telegram_user_id` существует один
+- Для одной пары `telegram_chat_id` + `telegram_users.id` существует один
   разговор.
 - После генерации КП разговор не закрывается. Вместо этого
   `active_quote_draft_id` сбрасывается в `NULL`, а следующий продуктовый запрос
@@ -157,6 +157,15 @@ CREATE TABLE quote_drafts (
     client_name TEXT,
     manager_note TEXT,
     clarification_question TEXT,
+    clarification_kind TEXT CHECK (
+        clarification_kind IN (
+            'client_name',
+            'product_choice',
+            'bundle_choice',
+            'generic'
+        )
+        OR clarification_kind IS NULL
+    ),
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
 
@@ -176,7 +185,8 @@ collecting | needs_clarification | ready | generated | cancelled | superseded
 - `collecting` — черновик собирается: в него можно добавлять, заменять и удалять
   позиции.
 - `needs_clarification` — бот задал уточняющий вопрос и ждёт ответа менеджера.
-  Текст вопроса хранится в `clarification_question`.
+  Текст вопроса хранится в `clarification_question`, а тип ожидания — в
+  `clarification_kind`.
 - `ready` — черновик достаточно полный для генерации КП: позиции выбраны, суммы
   рассчитаны, клиент известен или будет передан в команде генерации.
 - `generated` — по черновику сформирован файл КП, запись о файле находится в
@@ -185,6 +195,26 @@ collecting | needs_clarification | ready | generated | cancelled | superseded
 - `superseded` — черновик заменён новым расчётом. Это не ошибка и не ручная
   отмена: например, после `ERP, 150 лицензий` менеджер написал
   `теперь посчитай УХ на 500 пользователей`.
+
+Допустимые переходы статусов:
+
+```text
+collecting -> needs_clarification
+needs_clarification -> collecting
+collecting -> ready
+ready -> collecting
+ready -> generated
+collecting | needs_clarification | ready -> cancelled
+collecting | needs_clarification | ready -> superseded
+```
+
+`clarify_answer` всегда обрабатывается через сохранённый `clarification_kind`.
+После успешного ответа приложение очищает `clarification_question` и
+`clarification_kind`.
+
+`quote_drafts.title` в v1 формируется детерминированно: взять исходный
+продуктовый запрос, убрать пробелы по краям и обрезать до 120 символов. LLM не
+генерирует заголовок черновика в v1.
 
 ### `quote_items`
 
@@ -246,7 +276,9 @@ CREATE TABLE generated_quotes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     quote_draft_id INTEGER NOT NULL,
     file_path TEXT NOT NULL,
-    file_format TEXT NOT NULL,
+    file_format TEXT NOT NULL CHECK (
+        file_format IN ('md')
+    ),
     total_sum REAL,
     created_at TEXT NOT NULL,
 
@@ -259,10 +291,10 @@ CREATE TABLE generated_quotes (
 
 ```sql
 CREATE INDEX idx_conversations_user
-ON conversations (telegram_user_id);
+ON conversations (telegram_user_pk);
 
 CREATE INDEX idx_conversations_chat_user
-ON conversations (telegram_chat_id, telegram_user_id);
+ON conversations (telegram_chat_id, telegram_user_pk);
 
 CREATE INDEX idx_conversations_active_draft
 ON conversations (active_quote_draft_id);
@@ -289,9 +321,10 @@ ON generated_quotes (quote_draft_id);
 
 ```sql
 SELECT *
-FROM conversations
-WHERE telegram_chat_id = :telegram_chat_id
-  AND telegram_user_id = :telegram_user_id;
+FROM conversations c
+JOIN telegram_users u ON u.id = c.telegram_user_pk
+WHERE c.telegram_chat_id = :telegram_chat_id
+  AND u.telegram_user_id = :telegram_user_id;
 ```
 
 ### Получить активный черновик разговора
@@ -318,8 +351,9 @@ SELECT
     COALESCE(SUM(CASE WHEN qi.status = 'selected' THEN qi.line_sum ELSE 0 END), 0) AS total_sum
 FROM quote_drafts qd
 JOIN conversations c ON c.id = qd.conversation_id
+JOIN telegram_users u ON u.id = c.telegram_user_pk
 LEFT JOIN quote_items qi ON qi.quote_draft_id = qd.id
-WHERE c.telegram_user_id = :telegram_user_id
+WHERE u.telegram_user_id = :telegram_user_id
   AND qd.status IN ('collecting', 'needs_clarification', 'ready')
 GROUP BY qd.id
 ORDER BY qd.updated_at DESC
@@ -337,6 +371,12 @@ LIMIT 10;
 SELECT qd.*
 FROM quote_drafts qd
 JOIN conversations c ON c.id = qd.conversation_id
+JOIN telegram_users u ON u.id = c.telegram_user_pk
 WHERE qd.id = :draft_id
-  AND c.telegram_user_id = :telegram_user_id;
+  AND u.telegram_user_id = :telegram_user_id;
 ```
+
+### Формат НДС
+
+`quote_items.vat` хранит display text, полученный от MCP, например `НДС 20%`.
+Приложение v1 не парсит это поле и не выполняет расчёт НДС.

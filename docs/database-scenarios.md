@@ -21,16 +21,19 @@
 
 ```sql
 SELECT * FROM telegram_users WHERE telegram_user_id = 1001;
-SELECT * FROM conversations
-WHERE telegram_chat_id = 2001 AND telegram_user_id = 1001;
+SELECT c.*
+FROM conversations c
+JOIN telegram_users u ON u.id = c.telegram_user_pk
+WHERE c.telegram_chat_id = 2001
+  AND u.telegram_user_id = 1001;
 ```
 
 Если пользователя или разговора нет, запись:
 
 ```sql
 INSERT INTO telegram_users (...);
-INSERT INTO conversations (..., active_quote_draft_id, ...)
-VALUES (..., NULL, ...);
+INSERT INTO conversations (..., telegram_user_pk, active_quote_draft_id, ...)
+VALUES (..., :telegram_user_pk, NULL, ...);
 ```
 
 Запись входящего сообщения:
@@ -47,7 +50,8 @@ LLM action selection:
   "action": "add_items",
   "arguments": {
     "items_text": "УТ, сервер, 10 лицензий"
-  }
+  },
+  "reason": "Менеджер перечислил продуктовые позиции для расчёта."
 }
 ```
 
@@ -56,11 +60,11 @@ LLM action selection:
 ```sql
 INSERT INTO quote_drafts (
     conversation_id, status, title, client_name, manager_note,
-    clarification_question, created_at, updated_at
+    clarification_question, clarification_kind, created_at, updated_at
 )
 VALUES (
     :conversation_id, 'collecting', 'УТ, сервер, 10 лицензий',
-    NULL, NULL, NULL, :now, :now
+    NULL, NULL, NULL, NULL, :now, :now
 );
 
 UPDATE conversations
@@ -114,7 +118,8 @@ LLM action selection:
 ```json
 {
   "action": "create_quote_file",
-  "arguments": {}
+  "arguments": {},
+  "reason": "Менеджер просит сформировать КП по текущему черновику."
 }
 ```
 
@@ -130,6 +135,13 @@ WHERE c.id = :conversation_id;
 Если `client_name IS NULL`, бот спрашивает клиента:
 
 ```sql
+UPDATE quote_drafts
+SET status = 'needs_clarification',
+    clarification_question = 'Для какого клиента создать КП?',
+    clarification_kind = 'client_name',
+    updated_at = :now
+WHERE id = :draft_id;
+
 INSERT INTO messages (..., direction, role, text, ...)
 VALUES (:conversation_id, ..., 'out', 'bot', 'Для какого клиента создать КП?', :now);
 ```
@@ -143,7 +155,8 @@ LLM action selection с учётом ожидаемого ответа:
   "action": "clarify_answer",
   "arguments": {
     "answer": "ООО Ромашка"
-  }
+  },
+  "reason": "Менеджер ответил на сохранённый вопрос о клиенте."
 }
 ```
 
@@ -151,7 +164,11 @@ LLM action selection с учётом ожидаемого ответа:
 
 ```sql
 UPDATE quote_drafts
-SET client_name = 'ООО Ромашка', status = 'ready', updated_at = :now
+SET client_name = 'ООО Ромашка',
+    status = 'ready',
+    clarification_question = NULL,
+    clarification_kind = NULL,
+    updated_at = :now
 WHERE id = :draft_id;
 ```
 
@@ -216,7 +233,8 @@ generated_quotes: записей нет
 SELECT qd.*
 FROM quote_drafts qd
 JOIN conversations c ON c.id = qd.conversation_id
-WHERE c.telegram_user_id = 1001
+JOIN telegram_users u ON u.id = c.telegram_user_pk
+WHERE u.telegram_user_id = 1001
   AND qd.status IN ('collecting', 'needs_clarification', 'ready');
 ```
 
@@ -228,7 +246,7 @@ WHERE c.telegram_user_id = 1001
 ### 3.1 Разговор без активного черновика, менеджер пишет `покажи мои черновики`
 
 Находится существующий `conversation` для пары `telegram_chat_id` +
-`telegram_user_id`. Если такой записи ещё нет, она создаётся.
+`telegram_users.id`. Если такой записи ещё нет, она создаётся.
 
 Запись входящего сообщения:
 
@@ -242,7 +260,8 @@ LLM action selection:
 ```json
 {
   "action": "list_drafts",
-  "arguments": {}
+  "arguments": {},
+  "reason": "Менеджер просит показать незавершённые черновики."
 }
 ```
 
@@ -257,8 +276,9 @@ SELECT
     COALESCE(SUM(CASE WHEN qi.status = 'selected' THEN qi.line_sum ELSE 0 END), 0) AS total_sum
 FROM quote_drafts qd
 JOIN conversations c ON c.id = qd.conversation_id
+JOIN telegram_users u ON u.id = c.telegram_user_pk
 LEFT JOIN quote_items qi ON qi.quote_draft_id = qd.id
-WHERE c.telegram_user_id = 1001
+WHERE u.telegram_user_id = 1001
   AND qd.status IN ('collecting', 'needs_clarification', 'ready')
 GROUP BY qd.id
 ORDER BY qd.updated_at DESC
@@ -283,7 +303,8 @@ LLM action selection:
   "action": "open_draft",
   "arguments": {
     "draft_id": 12
-  }
+  },
+  "reason": "Менеджер выбрал черновик для продолжения."
 }
 ```
 
@@ -293,8 +314,9 @@ LLM action selection:
 SELECT qd.*
 FROM quote_drafts qd
 JOIN conversations c ON c.id = qd.conversation_id
+JOIN telegram_users u ON u.id = c.telegram_user_pk
 WHERE qd.id = 12
-  AND c.telegram_user_id = 1001;
+  AND u.telegram_user_id = 1001;
 ```
 
 Связать текущий разговор с черновиком:
@@ -322,7 +344,8 @@ LLM action selection:
   "action": "add_items",
   "arguments": {
     "items_text": "ДО КОРП"
-  }
+  },
+  "reason": "Менеджер просит добавить позицию в открытый черновик."
 }
 ```
 
@@ -361,7 +384,8 @@ LLM action selection:
   "action": "create_quote_file",
   "arguments": {
     "client_name": "ООО Ромашка"
-  }
+  },
+  "reason": "Менеджер просит сформировать КП и указал клиента."
 }
 ```
 
@@ -405,7 +429,8 @@ LLM action selection:
   "action": "add_items",
   "arguments": {
     "items_text": "ДО"
-  }
+  },
+  "reason": "Менеджер просит добавить позицию в текущий черновик."
 }
 ```
 
@@ -430,6 +455,7 @@ VALUES (
 UPDATE quote_drafts
 SET status = 'needs_clarification',
     clarification_question = 'Какой ДО: ПРОФ или КОРП?',
+    clarification_kind = 'product_choice',
     updated_at = :now
 WHERE id = :draft_a;
 
@@ -449,7 +475,8 @@ LLM action selection:
   "action": "new_calculation",
   "arguments": {
     "items_text": "УХ на 500 пользователей"
-  }
+  },
+  "reason": "Менеджер явно просит заменить текущий расчёт новым."
 }
 ```
 
@@ -468,11 +495,11 @@ WHERE id = :draft_a;
 ```sql
 INSERT INTO quote_drafts (
     conversation_id, status, title, client_name, manager_note,
-    clarification_question, created_at, updated_at
+    clarification_question, clarification_kind, created_at, updated_at
 )
 VALUES (
     :conversation_id, 'collecting', 'УХ на 500 пользователей',
-    NULL, NULL, NULL, :now, :now
+    NULL, NULL, NULL, NULL, :now, :now
 );
 
 UPDATE conversations
@@ -506,7 +533,8 @@ LLM action selection:
   "action": "create_quote_file",
   "arguments": {
     "client_name": "ООО Вектор"
-  }
+  },
+  "reason": "Менеджер просит сформировать КП и указал клиента."
 }
 ```
 
@@ -575,7 +603,8 @@ LLM action selection:
   "action": "create_quote_file",
   "arguments": {
     "client_name": "ООО Ромашка"
-  }
+  },
+  "reason": "Менеджер просит сформировать КП и указал клиента."
 }
 ```
 
@@ -631,7 +660,8 @@ LLM action selection:
   "action": "add_items",
   "arguments": {
     "items_text": "ERP, сервер, 150 лицензий"
-  }
+  },
+  "reason": "Менеджер начал новый продуктовый расчёт без активного черновика."
 }
 ```
 
@@ -641,11 +671,11 @@ LLM action selection:
 ```sql
 INSERT INTO quote_drafts (
     conversation_id, status, title, client_name, manager_note,
-    clarification_question, created_at, updated_at
+    clarification_question, clarification_kind, created_at, updated_at
 )
 VALUES (
     :conversation_id, 'collecting', 'ERP, сервер, 150 лицензий',
-    NULL, NULL, NULL, :now, :now
+    NULL, NULL, NULL, NULL, :now, :now
 );
 
 UPDATE conversations
@@ -724,3 +754,112 @@ conversations.active_quote_draft_id = NULL
 ```text
 Создать новый расчёт с ДО или открыть один из прошлых черновиков как основу?
 ```
+
+## 6. Поиск и изменение черновиков
+
+### 6.1 Менеджер пишет `найди прошлый расчет по ERP`
+
+LLM action selection:
+
+```json
+{
+  "action": "find_drafts",
+  "arguments": {
+    "query": "ERP"
+  },
+  "reason": "Менеджер ищет старые незавершённые расчёты по тексту."
+}
+```
+
+Чтение черновиков:
+
+```sql
+SELECT
+    qd.id, qd.title, qd.status, qd.client_name, qd.updated_at,
+    COUNT(CASE WHEN qi.status = 'selected' THEN qi.id END) AS selected_items_count,
+    COALESCE(SUM(CASE WHEN qi.status = 'selected' THEN qi.line_sum ELSE 0 END), 0) AS total_sum
+FROM quote_drafts qd
+JOIN conversations c ON c.id = qd.conversation_id
+JOIN telegram_users u ON u.id = c.telegram_user_pk
+LEFT JOIN quote_items qi ON qi.quote_draft_id = qd.id
+WHERE u.telegram_user_id = 1001
+  AND qd.status IN ('collecting', 'needs_clarification', 'ready')
+  AND (
+      qd.title LIKE :query_like
+      OR qd.client_name LIKE :query_like
+      OR qd.manager_note LIKE :query_like
+  )
+GROUP BY qd.id
+ORDER BY qd.updated_at DESC
+LIMIT 10;
+```
+
+MCP не вызывается.
+
+### 6.2 Менеджер пишет `убери ЗУП`
+
+LLM action selection:
+
+```json
+{
+  "action": "remove_item",
+  "arguments": {
+    "target": "ЗУП"
+  },
+  "reason": "Менеджер просит убрать позицию из текущего черновика."
+}
+```
+
+Обновление позиции:
+
+```sql
+UPDATE quote_items
+SET status = 'removed', updated_at = :now
+WHERE quote_draft_id = :draft_id
+  AND status != 'removed'
+  AND (
+      source_query LIKE :target_like
+      OR selected_product_name LIKE :target_like
+      OR selected_product_code LIKE :target_like
+  );
+
+UPDATE quote_drafts
+SET status = 'collecting', updated_at = :now
+WHERE id = :draft_id;
+```
+
+Если найдено несколько возможных позиций для удаления, бот задаёт уточняющий
+вопрос и не меняет позиции до ответа менеджера.
+
+### 6.3 Менеджер пишет `бухгалтерию замени на базовую`
+
+LLM action selection:
+
+```json
+{
+  "action": "replace_item",
+  "arguments": {
+    "target": "бухгалтерия",
+    "replacement_text": "базовая"
+  },
+  "reason": "Менеджер просит заменить позицию в текущем черновике."
+}
+```
+
+Замена выполняется как удаление старой позиции и добавление новой:
+
+```sql
+UPDATE quote_items
+SET status = 'removed', updated_at = :now
+WHERE quote_draft_id = :draft_id
+  AND status != 'removed'
+  AND (
+      source_query LIKE :target_like
+      OR selected_product_name LIKE :target_like
+      OR selected_product_code LIKE :target_like
+  );
+```
+
+После этого Quote service выполняет product extraction и MCP-поиск для
+`replacement_text`, добавляет новую выбранную позицию в `quote_items` и
+переводит черновик в `collecting`.
