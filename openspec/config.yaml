@@ -1,0 +1,109 @@
+context: |
+  # Проект: 1C Price Bot
+
+  ## Назначение
+
+  Telegram-помощник для менеджеров по продажам: свободный текстовый запрос →
+  LLM разбирает намерение → MCP-сервер `mcp-1c-price` даёт актуальные продукты
+  и цены 1С → готовый Markdown КП отправляется менеджеру.
+
+  ## Стек v1
+
+  Python + aiogram, Telegram long polling, OpenRouter LLM API, MCP subprocess
+  over stdio, SQLite + aiosqlite, Jinja2 Markdown-шаблон.
+
+  ## Правила разработки
+
+  - Документацию и артефакты OpenSpec писать на русском языке.
+  - `rules/*.md` — runtime-контекст для LLM, не документация и не DSL.
+  - LLM выбирает action через JSON response (не tool calling); продукты и цены
+    всегда через MCP.
+  - v1 локальная: long polling, SQLite, MCP subprocess. Не вводить многоинстансность.
+  - Держать чёткие границы между пакетами: bot / quotes / llm / mcp / storage / common.
+  - Не добавлять абстракции и фичи за пределами v1 scope без явного решения.
+
+  ## Документация проекта
+
+  Перед написанием любого артефакта прочитать соответствующие документы:
+
+  ### Скоуп и цели
+  - `docs/scope.md` — что входит и не входит в v1, критерии успеха.
+
+  ### Архитектура
+  - `docs/architecture.md` — компоненты (Telegram layer, Quote service, LLM layer,
+    MCP layer, Rules layer, Storage layer, Renderer), LLM input/output contract,
+    10 поддерживаемых LLM actions с аргументами, поток данных.
+
+  ### База данных
+  - `docs/database.md` — полная DDL-схема всех таблиц: `telegram_users`,
+    `conversations`, `messages`, `quote_drafts`, `quote_items`, `generated_quotes`.
+    PRAGMA-настройки, статусы, CHECK-ограничения, граф переходов `quote_drafts.status`,
+    индексы, типовые SQL-чтения.
+  - `docs/database-scenarios.md` — SQL-примеры для всех 11 пользовательских
+    сценариев: создание КП, брошенные черновики, открытие старого черновика,
+    уточнения, замена расчёта, два КП в одном разговоре, find/remove/replace.
+
+  ### Внешние интеграции
+  - `docs/mcp-contract.md` — bot-side adapter contract для MCP-инструментов
+    `search_products`, `get_product`, `build_quote`, `refresh_prices`:
+    request/response-схемы, lifecycle (subprocess, stdio, reconnect при ошибке).
+
+  ### Конфигурация
+  - `docs/configuration.md` — переменные окружения: `TELEGRAM_TOKEN`,
+    `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `MCP_SERVER_PATH`, `DATA_DIR`,
+    `OUTPUT_DIR`, `RULES_DIR`, `TEMPLATES_DIR`. Производные пути.
+  - `.env.example` — пример файла окружения с дефолтными путями.
+
+  ### Renderer
+  - `docs/quote-template.md` — структура данных для Jinja2-шаблона: поля
+    `client_name`, `generated_at`, `items` (code/name/qty/price_retail/line_sum/vat),
+    `total_sum`, `note`. Правила форматирования денежных значений.
+  - `templates/quote.md.j2` — рабочий Jinja2-шаблон Markdown КП.
+
+  ### Тестирование
+  - `docs/testing-scenarios.md` — 11 сценариев ручной приёмки v1: /start,
+    /refresh_prices, простой запрос, неоднозначный продукт, генерация файла,
+    восстановление после перезапуска, правила лицензирования, бандлы, апгрейды,
+    просмотр черновиков, два КП в одном разговоре.
+
+  ### Архитектурные решения
+  - `docs/decisions/0001-v1-shape.md` — выбор стека (Python/aiogram, long polling,
+    OpenRouter, SQLite, Markdown output) и его последствия.
+  - `docs/decisions/0002-runtime-markdown-rules.md` — решение хранить предметные
+    правила в `rules/*.md` как runtime prompt-контекст без DSL и rule engine.
+
+  ## Структура исходного кода
+
+  ```
+  src/price_bot/
+    bot/        # Telegram handlers, long polling
+    quotes/     # Quote service, orchestration
+    llm/        # OpenRouter client, prompt builder, JSON parser
+    mcp/        # MCP subprocess/client, adapter
+    storage/    # aiosqlite repositories, migrations
+    common/     # config, errors, shared types
+  ```
+
+  Пакеты-заглушки созданы. Реализация отсутствует — v1 ещё не написана.
+
+  ## Runtime-правила (не документация)
+
+  ```
+  rules/
+    licensing.md     # ПРОФ/КОРП, серверы, количество пользователей
+    upgrades.md      # допустимые апгрейды
+    bundles.md       # готовые комплекты vs сборка по компонентам
+    quote-behavior.md # поведение бота: черновики, расчёты, КП, уточнения
+  ```
+
+  Файлы существуют. Это runtime-контекст для LLM, не спека.
+
+  ## Ключевые инварианты v1
+
+  - LLM action selection — JSON response (не tool calling). Envelope:
+    `{"action": "...", "arguments": {...}, "reason": "..."}`.
+  - При malformed JSON или неизвестном action: не менять черновик, попросить уточнение.
+  - При MCP ошибке: не сохранять частично изменённый черновик.
+  - `quote_items.vat` — display text из MCP (например `НДС 20%`), не парсить.
+  - `quote_drafts.title` = trim(items_text)[:120], без LLM-генерации.
+  - `clarify_answer` интерпретируется только через `clarification_kind` из БД.
